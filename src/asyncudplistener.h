@@ -1,10 +1,11 @@
 #pragma once
 
 // system includes
-#include <functional>
 #include <cstring>
 #include <optional>
 #include <array>
+#include <string_view>
+#include <memory>
 
 // esp-idf includes
 #include <lwip/ip_addr.h>
@@ -18,15 +19,20 @@
 #include "espwifiutils.h"
 #include "wrappers/queue.h"
 
-class UdpPacketWrapper
+using pbufUniquePtr = std::unique_ptr<pbuf, decltype(&pbuf_free)>;
+
+struct UdpPacketWrapper
 {
-    CPP_DISABLE_COPY_MOVE(UdpPacketWrapper)
+    //UdpPacketWrapper(pbufUniquePtr &&pb, const ip_addr_t *addr, uint16_t port, struct netif * netif);
+    ~UdpPacketWrapper() = default;
 
-public:
-    UdpPacketWrapper(pbuf *pb, const ip_addr_t *addr, uint16_t port, struct netif * netif);
+    UdpPacketWrapper(UdpPacketWrapper &&other) = default;
+    UdpPacketWrapper(const UdpPacketWrapper &other) = delete;
 
-    const uint8_t *data() const { return _data; }
-    size_t length() const { return _len; }
+    UdpPacketWrapper &operator=(UdpPacketWrapper &&other) = default;
+    UdpPacketWrapper &operator=(const UdpPacketWrapper &other) = delete;
+
+    auto data() const { return _data; }
     bool isBroadcast() const
     {
         if (_localIp.type == IPADDR_TYPE_V6)
@@ -73,17 +79,14 @@ public:
 
     wifi_stack::mac_t remoteMac() const { return _remoteMac; }
 
-private:
-    const pbuf *_pb;
-    tcpip_adapter_if_t _if;
+    pbufUniquePtr _pb;
+    tcpip_adapter_if_t _if{TCPIP_ADAPTER_IF_MAX};
+    std::string_view _data;
     ip_addr_t _localIp;
     uint16_t _localPort;
     ip_addr_t _remoteIp;
     uint16_t _remotePort;
     wifi_stack::mac_t _remoteMac;
-    const uint8_t *_data;
-    size_t _len;
-    size_t _index;
 };
 
 class AsyncUdpListener
@@ -116,9 +119,9 @@ public:
         return listen(IP_ANY_TYPE, port);
     }
 
-    void poll(std::function<void(const UdpPacketWrapper &packet)> &&callback, TickType_t xTicksToWait = 0);
+    std::optional<UdpPacketWrapper> poll(TickType_t xTicksToWait = 0);
 
-    static bool _udp_task_post(void *arg, udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_t port, struct netif *netif);
+    void _udp_task_post(udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_t port, struct netif *netif);
 
 private:
     bool _init();

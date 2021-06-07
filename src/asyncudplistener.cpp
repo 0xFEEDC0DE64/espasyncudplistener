@@ -14,15 +14,14 @@
 namespace {
 constexpr const char * const TAG = "ASYNC_UDP_LISTENER";
 
-typedef struct
+struct lwip_event_packet_t
 {
-    void *arg;
     udp_pcb *pcb;
-    pbuf *pb;
+    pbufUniquePtr pb;
     const ip_addr_t *addr;
     uint16_t port;
     struct netif *netif;
-} lwip_event_packet_t;
+};
 
 typedef struct
 {
@@ -69,63 +68,78 @@ void _udp_disconnect(struct udp_pcb *pcb)
 
 void _udp_recv(void *arg, udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_t port)
 {
-    while (pb != NULL)
+    if (!arg)
     {
-        pbuf *this_pb = pb;
-        pb = pb->next;
-        this_pb->next = NULL;
-
-        if (!AsyncUdpListener::_udp_task_post(arg, pcb, this_pb, addr, port, ip_current_input_netif()))
-            pbuf_free(this_pb);
+        ESP_LOGW(TAG, "called without arg");
+        return;
     }
-}
-} // namespace
 
-UdpPacketWrapper::UdpPacketWrapper(pbuf *pb, const ip_addr_t *raddr, uint16_t rport, struct netif *ntif)
+    auto *_this = reinterpret_cast<AsyncUdpListener*>(arg);
+    _this->_udp_task_post(pcb, pb, addr, port, ip_current_input_netif());
+}
+
+UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *raddr, uint16_t rport, struct netif *ntif)
 {
-    _pb = pb;
-    _if = TCPIP_ADAPTER_IF_MAX;
-    _data = (uint8_t*)(pb->payload);
-    _len = pb->len;
-    _index = 0;
+    assert(_pb);
+
+    tcpip_adapter_if_t _if{TCPIP_ADAPTER_IF_MAX};
+    std::string_view _data;
+    ip_addr_t _localIp;
+    uint16_t _localPort;
+    ip_addr_t _remoteIp;
+    uint16_t _remotePort;
+    wifi_stack::mac_t _remoteMac;
+
+    auto payload = reinterpret_cast<const char *>(_pb->payload);
+    _data = std::string_view{payload, _pb->len};
 
     //memcpy(&_remoteIp, raddr, sizeof(ip_addr_t));
     _remoteIp.type = raddr->type;
     _localIp.type = _remoteIp.type;
 
-    eth_hdr* eth = NULL;
-    const udp_hdr* udphdr = reinterpret_cast<const udp_hdr*>(_data - UDP_HLEN);
-    _localPort = ntohs(udphdr->dest);
-    _remotePort = ntohs(udphdr->src);
+    const eth_hdr *eth{};
+
+    {
+        const udp_hdr *udphdr = reinterpret_cast<const udp_hdr*>(payload - UDP_HLEN);
+        _localPort = ntohs(udphdr->dest);
+        _remotePort = ntohs(udphdr->src);
+    }
 
     if (_remoteIp.type == IPADDR_TYPE_V4)
     {
-        eth = (eth_hdr *)(((uint8_t *)(pb->payload)) - UDP_HLEN - IP_HLEN - SIZEOF_ETH_HDR);
-        struct ip_hdr * iphdr = (struct ip_hdr *)(((uint8_t *)(pb->payload)) - UDP_HLEN - IP_HLEN);
+        eth = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP_HLEN - SIZEOF_ETH_HDR);
+
+        const ip_hdr *iphdr = reinterpret_cast<const ip_hdr *>(payload - UDP_HLEN - IP_HLEN);
         _localIp.u_addr.ip4.addr = iphdr->dest.addr;
         _remoteIp.u_addr.ip4.addr = iphdr->src.addr;
     }
     else
     {
-        eth = (eth_hdr *)(((uint8_t *)(pb->payload)) - UDP_HLEN - IP6_HLEN - SIZEOF_ETH_HDR);
-        struct ip6_hdr * ip6hdr = (struct ip6_hdr *)(((uint8_t *)(pb->payload)) - UDP_HLEN - IP6_HLEN);
+        eth = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP6_HLEN - SIZEOF_ETH_HDR);
+
+        const ip6_hdr *ip6hdr = reinterpret_cast<const ip6_hdr *>(payload - UDP_HLEN - IP6_HLEN);
         std::memcpy(&_localIp.u_addr.ip6.addr, (uint8_t *)ip6hdr->dest.addr, 16);
         std::memcpy(&_remoteIp.u_addr.ip6.addr, (uint8_t *)ip6hdr->src.addr, 16);
     }
+
     _remoteMac = wifi_stack::mac_t{eth->src.addr};
 
-    void *nif{NULL};
-    for (int i=0; i<TCPIP_ADAPTER_IF_MAX; i++)
+    for (int i = 0; i < TCPIP_ADAPTER_IF_MAX; i++)
     {
-        tcpip_adapter_get_netif((tcpip_adapter_if_t)i, &nif);
-        struct netif *netif = (struct netif *)nif;
+        void *nif{};
+        tcpip_adapter_get_netif(tcpip_adapter_if_t(i), &nif);
+
+        const struct netif *netif = reinterpret_cast<const struct netif *>(nif);
         if (netif && netif == ntif)
         {
-            _if = (tcpip_adapter_if_t)i;
+            _if = tcpip_adapter_if_t(i);
             break;
         }
     }
+
+    return UdpPacketWrapper{std::move(_pb), _if, _data, _localIp, _localPort, _remoteIp, _remotePort, _remoteMac};
 }
+} // namespace
 
 bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
 {
@@ -165,69 +179,77 @@ bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
     return true;
 }
 
-void AsyncUdpListener::poll(std::function<void(const UdpPacketWrapper &packet)> &&callback, TickType_t xTicksToWait)
+std::optional<UdpPacketWrapper> AsyncUdpListener::poll(TickType_t xTicksToWait)
 {
     if (!_udp_queue.constructed())
-        return;
-
-    lwip_event_packet_t *e{NULL};
-    while (_udp_queue->receive(&e, xTicksToWait) == pdTRUE)
     {
-        if (!e->pb)
+        ESP_LOGW(TAG, "queue not constructed");
+        return std::nullopt;
+    }
+
+    lwip_event_packet_t *ePtr{};
+    if (const auto result = _udp_queue->receive(&ePtr, xTicksToWait); result != pdTRUE)
+    {
+        //ESP_LOGE(TAG, "_udp_queue->receive() failed with %i", result);
+        return std::nullopt;
+    }
+
+    if (!ePtr)
+    {
+        ESP_LOGE(TAG, "invalid ptr from queue received");
+        return std::nullopt;
+    }
+
+    std::unique_ptr<lwip_event_packet_t> e{ePtr};
+    if (!e->pb)
+    {
+        ESP_LOGE(TAG, "invalid pb");
+        return std::nullopt;
+    }
+
+    // we can only return 1, so no linked lists please
+    assert(!e->pb->next);
+
+    //udp_pcb *upcb = e->pcb;
+    const ip_addr_t *addr = e->addr;
+    uint16_t port = e->port;
+    struct netif *netif = e->netif;
+
+    return makeUdpPacketWrapper(std::move(e->pb), addr, port, netif);
+}
+
+void AsyncUdpListener::_udp_task_post(udp_pcb *_pcb, pbuf *pb, const ip_addr_t *_addr, uint16_t _port, struct netif *_netif)
+{
+    if (!_udp_queue.constructed())
+    {
+        ESP_LOGW(TAG, "queue not constructed");
+        return;
+    }
+
+    while (pb)
+    {
+        pbufUniquePtr this_pb{pb, pbuf_free};
+        pb = pb->next;
+        this_pb->next = nullptr;
+
+        auto e = std::unique_ptr<lwip_event_packet_t>{new lwip_event_packet_t{
+            .pcb = _pcb,
+            .pb = std::move(this_pb),
+            .addr = _addr,
+            .port = _port,
+            .netif = _netif
+        }};
+
+        auto ptr = e.get();
+        if (const auto result = _udp_queue->send(&ptr, portMAX_DELAY); result != pdPASS)
         {
-            free((void*)(e));
+            ESP_LOGE(TAG, "_udp_queue->send failed with %i", result);
             continue;
         }
 
-        //udp_pcb *upcb = e->pcb;
-        pbuf *pb = e->pb;
-        const ip_addr_t *addr = e->addr;
-        uint16_t port = e->port;
-        struct netif *netif = e->netif;
-
-        while (pb != NULL)
-        {
-            pbuf *this_pb = pb;
-            pb = pb->next;
-            this_pb->next = NULL;
-
-            if (callback)
-                callback(UdpPacketWrapper{this_pb, addr, port, netif});
-
-            pbuf_free(this_pb);
-        }
-
-        free((void*)(e));
+        // queue takes ownership
+        e.release();
     }
-}
-
-bool AsyncUdpListener::_udp_task_post(void *arg, udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_t port, struct netif *netif)
-{
-    if (!arg)
-        return false;
-
-    auto &queue = reinterpret_cast<AsyncUdpListener*>(arg)->_udp_queue;
-    if (!queue.constructed())
-        return false;
-
-    lwip_event_packet_t *e = (lwip_event_packet_t *)malloc(sizeof(lwip_event_packet_t));
-    if (!e)
-        return false;
-
-    e->arg = arg;
-    e->pcb = pcb;
-    e->pb = pb;
-    e->addr = addr;
-    e->port = port;
-    e->netif = netif;
-
-    if (queue->send(&e, portMAX_DELAY) != pdPASS)
-    {
-        free((void*)(e));
-        return false;
-    }
-
-    return true;
 }
 
 bool AsyncUdpListener::_init()
