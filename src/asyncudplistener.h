@@ -33,59 +33,31 @@ struct UdpPacketWrapper
     UdpPacketWrapper &operator=(const UdpPacketWrapper &other) = delete;
 
     auto data() const { return _data; }
-    bool isBroadcast() const
-    {
-        if (_localIp.type == IPADDR_TYPE_V6)
-            return false;
-        uint32_t ip = _localIp.u_addr.ip4.addr;
-        return ip == 0xFFFFFFFF || ip == 0 || (ip & 0xFF000000) == 0xFF000000;
-    }
-    bool isMulticast() const { return ip_addr_ismulticast(&(_localIp)); }
-    bool isIPv6() const { return _localIp.type == IPADDR_TYPE_V6; }
 
-    tcpip_adapter_if_t interface() const { return _if; }
+    tcpip_adapter_if_t tcpIpAdapter() const;
 
-    std::optional<u32_t> localIP() const
-    {
-        if (_localIp.type != IPADDR_TYPE_V4)
-            return std::nullopt;
-        return _localIp.u_addr.ip4.addr;
-    }
+    struct netif *ntif() const { return _ntif; }
 
-    std::optional<std::array<u32_t, 4>> localIPv6() const
-    {
-        if (_localIp.type != IPADDR_TYPE_V6)
-            return std::nullopt;
-        return *reinterpret_cast<const std::array<u32_t, 4>*>(_localIp.u_addr.ip6.addr);
-    }
+    bool isBroadcast() const { return ip_addr_isbroadcast(&(_local.addr), _ntif); }
+    bool isMulticast() const { return ip_addr_ismulticast(&(_local.addr)); }
 
-    uint16_t localPort() const { return _localPort; }
+    ip_addr_t localAddr() const { return _local.addr; }
 
-    std::optional<u32_t> remoteIP() const
-    {
-        if (_remoteIp.type != IPADDR_TYPE_V4)
-            return std::nullopt;
-        return _remoteIp.u_addr.ip4.addr;
-    }
+    uint16_t localPort() const { return _local.port; }
 
-    std::optional<std::array<u32_t, 4>> remoteIPv6() const
-    {
-        if (_remoteIp.type != IPADDR_TYPE_V6)
-            return std::nullopt;
-        return *reinterpret_cast<const std::array<u32_t, 4>*>(_remoteIp.u_addr.ip6.addr);
-    }
+    ip_addr_t remoteAddr() const { return _remote.addr; }
 
-    uint16_t remotePort() const { return _remotePort; }
+    uint16_t remotePort() const { return _remote.port; }
 
     wifi_stack::mac_t remoteMac() const { return _remoteMac; }
 
     pbufUniquePtr _pb;
-    tcpip_adapter_if_t _if{TCPIP_ADAPTER_IF_MAX};
     std::string_view _data;
-    ip_addr_t _localIp;
-    uint16_t _localPort;
-    ip_addr_t _remoteIp;
-    uint16_t _remotePort;
+    struct netif *_ntif;
+    struct {
+        ip_addr_t addr;
+        uint16_t port;
+    } _local, _remote;
     wifi_stack::mac_t _remoteMac;
 };
 

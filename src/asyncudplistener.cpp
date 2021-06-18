@@ -78,26 +78,14 @@ void _udp_recv(void *arg, udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_
     _this->_udp_task_post(pcb, pb, addr, port, ip_current_input_netif());
 }
 
-UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *raddr, uint16_t rport, struct netif *ntif)
+UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *raddr, uint16_t rport, struct netif *_ntif)
 {
     assert(_pb);
 
-    tcpip_adapter_if_t _if{TCPIP_ADAPTER_IF_MAX};
-    std::string_view _data;
-    ip_addr_t _localIp;
-    uint16_t _localPort;
-    ip_addr_t _remoteIp;
-    uint16_t _remotePort;
-    wifi_stack::mac_t _remoteMac;
-
     auto payload = reinterpret_cast<const char *>(_pb->payload);
-    _data = std::string_view{payload, _pb->len};
 
-    //memcpy(&_remoteIp, raddr, sizeof(ip_addr_t));
-    _remoteIp.type = raddr->type;
-    _localIp.type = _remoteIp.type;
-
-    const eth_hdr *eth{};
+    uint16_t _localPort;
+    uint16_t _remotePort;
 
     {
         const udp_hdr *udphdr = reinterpret_cast<const udp_hdr*>(payload - UDP_HLEN);
@@ -105,41 +93,66 @@ UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *radd
         _remotePort = ntohs(udphdr->src);
     }
 
-    if (_remoteIp.type == IPADDR_TYPE_V4)
+    const eth_hdr *ethHdr{};
+    //memcpy(&_remoteIp, raddr, sizeof(ip_addr_t));
+    ip_addr_t _localAddr { .type = raddr->type };
+    ip_addr_t _remoteAddr { .type = raddr->type };
+    switch (_remoteAddr.type)
     {
-        eth = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP_HLEN - SIZEOF_ETH_HDR);
+    case IPADDR_TYPE_V4:
+    {
+        ethHdr = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP_HLEN - SIZEOF_ETH_HDR);
 
         const ip_hdr *iphdr = reinterpret_cast<const ip_hdr *>(payload - UDP_HLEN - IP_HLEN);
-        _localIp.u_addr.ip4.addr = iphdr->dest.addr;
-        _remoteIp.u_addr.ip4.addr = iphdr->src.addr;
+        _localAddr.u_addr.ip4.addr = iphdr->dest.addr;
+        _remoteAddr.u_addr.ip4.addr = iphdr->src.addr;
+
+        break;
     }
-    else
+    case IPADDR_TYPE_V6:
     {
-        eth = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP6_HLEN - SIZEOF_ETH_HDR);
+        ethHdr = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP6_HLEN - SIZEOF_ETH_HDR);
 
         const ip6_hdr *ip6hdr = reinterpret_cast<const ip6_hdr *>(payload - UDP_HLEN - IP6_HLEN);
-        std::memcpy(&_localIp.u_addr.ip6.addr, (uint8_t *)ip6hdr->dest.addr, 16);
-        std::memcpy(&_remoteIp.u_addr.ip6.addr, (uint8_t *)ip6hdr->src.addr, 16);
+        std::copy(std::cbegin(ip6hdr->dest.addr), std::cend(ip6hdr->dest.addr), std::begin(_localAddr.u_addr.ip6.addr));
+        std::copy(std::cbegin(ip6hdr->src.addr), std::cend(ip6hdr->src.addr), std::begin(_remoteAddr.u_addr.ip6.addr));
+
+        break;
+    }
+    default:
+        ESP_LOGW(TAG, "unknown ip type %i", _remoteAddr.type);
     }
 
-    _remoteMac = wifi_stack::mac_t{eth->src.addr};
-
-    for (int i = 0; i < TCPIP_ADAPTER_IF_MAX; i++)
-    {
-        void *nif{};
-        tcpip_adapter_get_netif(tcpip_adapter_if_t(i), &nif);
-
-        const struct netif *netif = reinterpret_cast<const struct netif *>(nif);
-        if (netif && netif == ntif)
-        {
-            _if = tcpip_adapter_if_t(i);
-            break;
-        }
-    }
-
-    return UdpPacketWrapper{std::move(_pb), _if, _data, _localIp, _localPort, _remoteIp, _remotePort, _remoteMac};
+    std::string_view _data{payload, _pb->len};
+    return UdpPacketWrapper{
+        ._pb = std::move(_pb),
+        ._data = _data,
+        ._ntif = _ntif,
+        ._local = { .addr = _localAddr, .port = _localPort },
+        ._remote = { .addr = _remoteAddr, .port = _remotePort },
+        ._remoteMac = ethHdr ? wifi_stack::mac_t{ethHdr->src.addr} : wifi_stack::mac_t{}
+    };
 }
 } // namespace
+
+tcpip_adapter_if_t UdpPacketWrapper::tcpIpAdapter() const
+{
+    for (int i = 0; i < TCPIP_ADAPTER_IF_MAX; i++)
+    {
+        tcpip_adapter_if_t tcpip_if = tcpip_adapter_if_t(i);
+        struct netif *nif{};
+        if (const auto result = tcpip_adapter_get_netif(tcpip_if, &nif); result != ESP_OK)
+        {
+            ESP_LOGW(TAG, "tcpip_adapter_get_netif() failed with %s", esp_err_to_name(result));
+            continue;
+        }
+
+        if (nif && nif == _ntif)
+            return tcpip_if;
+    }
+
+    return TCPIP_ADAPTER_IF_MAX;
+}
 
 bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
 {
