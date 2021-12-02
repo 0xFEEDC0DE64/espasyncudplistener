@@ -141,7 +141,7 @@ tcpip_adapter_if_t UdpPacketWrapper::tcpIpAdapter() const
     {
         tcpip_adapter_if_t tcpip_if = tcpip_adapter_if_t(i);
         struct netif *nif{};
-        if (const auto result = tcpip_adapter_get_netif(tcpip_if, &nif); result != ESP_OK)
+        if (const auto result = tcpip_adapter_get_netif(tcpip_if, (void**)&nif); result != ESP_OK)
         {
             ESP_LOGW(TAG, "tcpip_adapter_get_netif() failed with %s", esp_err_to_name(result));
             continue;
