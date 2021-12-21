@@ -95,6 +95,7 @@ UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *radd
 
     const eth_hdr *ethHdr{};
     //memcpy(&_remoteIp, raddr, sizeof(ip_addr_t));
+
     ip_addr_t _localAddr { .type = raddr->type };
     ip_addr_t _remoteAddr { .type = raddr->type };
     switch (_remoteAddr.type)
@@ -114,8 +115,10 @@ UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *radd
         ethHdr = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP6_HLEN - SIZEOF_ETH_HDR);
 
         const ip6_hdr *ip6hdr = reinterpret_cast<const ip6_hdr *>(payload - UDP_HLEN - IP6_HLEN);
-        std::copy(std::cbegin(ip6hdr->dest.addr), std::cend(ip6hdr->dest.addr), std::begin(_localAddr.u_addr.ip6.addr));
-        std::copy(std::cbegin(ip6hdr->src.addr), std::cend(ip6hdr->src.addr), std::begin(_remoteAddr.u_addr.ip6.addr));
+        memcpy(&_localAddr.u_addr.ip6.addr, (uint8_t *)ip6hdr->dest.addr, 16);
+        memcpy(&_remoteAddr.u_addr.ip6.addr, (uint8_t *)ip6hdr->src.addr, 16);
+//        std::copy(std::cbegin(ip6hdr->dest.addr), std::cend(ip6hdr->dest.addr), std::begin(_localAddr.u_addr.ip6.addr));
+//        std::copy(std::cbegin(ip6hdr->src.addr), std::cend(ip6hdr->src.addr), std::begin(_remoteAddr.u_addr.ip6.addr));
 
         break;
     }
