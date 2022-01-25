@@ -11,6 +11,10 @@
 #include <lwip/prot/ethernet.h>
 #include <esp_log.h>
 
+// 3rdparty lib includes
+#include <tl/expected.hpp>
+#include <fmt/core.h>
+
 namespace {
 constexpr const char * const TAG = "ASYNC_UDP_LISTENER";
 
@@ -78,7 +82,7 @@ void _udp_recv(void *arg, udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_
     _this->_udp_task_post(pcb, pb, addr, port, ip_current_input_netif());
 }
 
-UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *raddr, uint16_t rport, struct netif *_ntif)
+tl::expected<UdpPacketWrapper, std::string> makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *raddr, uint16_t rport, struct netif *_ntif)
 {
     assert(_pb);
 
@@ -112,18 +116,21 @@ UdpPacketWrapper makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *radd
     }
     case IPADDR_TYPE_V6:
     {
-        ethHdr = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP6_HLEN - SIZEOF_ETH_HDR);
+//        ethHdr = reinterpret_cast<const eth_hdr *>(payload - UDP_HLEN - IP6_HLEN - SIZEOF_ETH_HDR);
 
-        const ip6_hdr *ip6hdr = reinterpret_cast<const ip6_hdr *>(payload - UDP_HLEN - IP6_HLEN);
-        memcpy(&_localAddr.u_addr.ip6.addr, (uint8_t *)ip6hdr->dest.addr, 16);
-        memcpy(&_remoteAddr.u_addr.ip6.addr, (uint8_t *)ip6hdr->src.addr, 16);
+//        const ip6_hdr *ip6hdr = reinterpret_cast<const ip6_hdr *>(payload - UDP_HLEN - IP6_HLEN);
+//        memcpy(&_localAddr.u_addr.ip6.addr, (uint8_t *)ip6hdr->dest.addr, 16);
+//        memcpy(&_remoteAddr.u_addr.ip6.addr, (uint8_t *)ip6hdr->src.addr, 16);
+
 //        std::copy(std::cbegin(ip6hdr->dest.addr), std::cend(ip6hdr->dest.addr), std::begin(_localAddr.u_addr.ip6.addr));
 //        std::copy(std::cbegin(ip6hdr->src.addr), std::cend(ip6hdr->src.addr), std::begin(_remoteAddr.u_addr.ip6.addr));
 
-        break;
+//        break;
+
+        return tl::make_unexpected("udp response on ipv6 not supported");
     }
     default:
-        ESP_LOGW(TAG, "unknown ip type %i", _remoteAddr.type);
+        return tl::make_unexpected(fmt::format("unknown ip type {}", _remoteAddr.type));
     }
 
     std::string_view _data{payload, _pb->len};
@@ -231,7 +238,13 @@ std::optional<UdpPacketWrapper> AsyncUdpListener::poll(TickType_t xTicksToWait)
     uint16_t port = e->port;
     struct netif *netif = e->netif;
 
-    return makeUdpPacketWrapper(std::move(e->pb), addr, port, netif);
+    if (auto result = makeUdpPacketWrapper(std::move(e->pb), addr, port, netif); result)
+        return std::move(result).value();
+    else
+    {
+        ESP_LOGW(TAG, "%.*s", result.error().size(), result.error().data());
+        return std::nullopt;
+    }
 }
 
 void AsyncUdpListener::_udp_task_post(udp_pcb *_pcb, pbuf *pb, const ip_addr_t *_addr, uint16_t _port, struct netif *_netif)
