@@ -242,7 +242,7 @@ std::optional<UdpPacketWrapper> AsyncUdpListener::poll(TickType_t xTicksToWait)
         return std::move(result).value();
     else
     {
-        ESP_LOGW(TAG, "%.*s", result.error().size(), result.error().data());
+        ESP_LOGD(TAG, "%.*s", result.error().size(), result.error().data());
         return std::nullopt;
     }
 }
