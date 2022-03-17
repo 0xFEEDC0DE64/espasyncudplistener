@@ -34,8 +34,6 @@ struct UdpPacketWrapper
 
     auto data() const { return _data; }
 
-    tcpip_adapter_if_t tcpIpAdapter() const;
-
     struct netif *ntif() const { return _ntif; }
 
     bool isBroadcast() const { return ip_addr_isbroadcast(&(_local.addr), _ntif); }
