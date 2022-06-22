@@ -23,14 +23,14 @@ using pbufUniquePtr = std::unique_ptr<pbuf, decltype(&pbuf_free)>;
 
 struct UdpPacketWrapper
 {
-    //UdpPacketWrapper(pbufUniquePtr &&pb, const ip_addr_t *addr, uint16_t port, struct netif * netif);
-    ~UdpPacketWrapper() = default;
+//    UdpPacketWrapper(pbufUniquePtr &&pb, const ip_addr_t *addr, uint16_t port, struct netif * netif);
+//    ~UdpPacketWrapper() = default;
 
-    UdpPacketWrapper(UdpPacketWrapper &&other) = default;
-    UdpPacketWrapper(const UdpPacketWrapper &other) = delete;
+//    UdpPacketWrapper(UdpPacketWrapper &&other) = default;
+//    UdpPacketWrapper(const UdpPacketWrapper &other) = delete;
 
-    UdpPacketWrapper &operator=(UdpPacketWrapper &&other) = default;
-    UdpPacketWrapper &operator=(const UdpPacketWrapper &other) = delete;
+//    UdpPacketWrapper &operator=(UdpPacketWrapper &&other) = default;
+//    UdpPacketWrapper &operator=(const UdpPacketWrapper &other) = delete;
 
     auto data() const { return _data; }
 
