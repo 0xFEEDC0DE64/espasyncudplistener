@@ -65,6 +65,7 @@ class AsyncUdpListener
 
 public:
     AsyncUdpListener() = default;
+    ~AsyncUdpListener() { close(); }
 
     bool listen(const ip_addr_t *addr, uint16_t port);
 
@@ -93,9 +94,10 @@ public:
 
     void _udp_task_post(udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_t port, struct netif *netif);
 
+    void close();
+
 private:
     bool _init();
-    void close();
 
 private:
     cpputils::DelayedConstruction<espcpputils::queue> _udp_queue;

@@ -158,13 +158,13 @@ bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
         }
     }
 
+    close();
+
     if (!_init())
     {
         ESP_LOGE(TAG, "failed to init");
         return false;
     }
-
-    close();
 
     if (addr)
     {
@@ -172,6 +172,7 @@ bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
         IP_SET_TYPE_VAL(_pcb->remote_ip, addr->type);
     }
 
+    ESP_LOGI(TAG, "calling udp_bind()...");
     if (_udp_bind(_pcb, addr, port) != ERR_OK)
     {
         ESP_LOGE(TAG, "failed to bind");
@@ -262,30 +263,38 @@ void AsyncUdpListener::_udp_task_post(udp_pcb *_pcb, pbuf *pb, const ip_addr_t *
     }
 }
 
-bool AsyncUdpListener::_init()
-{
-    if (_pcb)
-        return true;
-
-    _pcb = udp_new();
-    if (!_pcb)
-    {
-        ESP_LOGE(TAG, "udp_new() failed");
-        return false;
-    }
-
-    udp_recv(_pcb, &_udp_recv, (void *)this);
-
-    return true;
-}
-
 void AsyncUdpListener::close()
 {
-    if (_pcb)
+    if (_connected)
     {
-        if (_connected)
-            _udp_disconnect(_pcb);
-
+        ESP_LOGI(TAG, "calling udp_diconnect()...");
+        _udp_disconnect(_pcb);
         _connected = false;
     }
+
+    if (_pcb)
+    {
+        ESP_LOGI(TAG, "calling udp_remove()...");
+        udp_remove(_pcb);
+        _pcb = nullptr;
+    }
+}
+
+bool AsyncUdpListener::_init()
+{
+    if (!_pcb)
+    {
+        ESP_LOGI(TAG, "calling udp_new()...");
+        _pcb = udp_new();
+        if (!_pcb)
+        {
+            ESP_LOGE(TAG, "udp_new() failed");
+            return false;
+        }
+
+        ESP_LOGI(TAG, "calling udp_recv()...");
+        udp_recv(_pcb, &_udp_recv, (void *)this);
+    }
+
+    return true;
 }
