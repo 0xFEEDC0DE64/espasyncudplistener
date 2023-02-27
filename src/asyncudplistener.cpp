@@ -5,6 +5,7 @@
 
 // system includes
 #include <cassert>
+#include <expected>
 
 // esp-idf includes
 #include <lwip/priv/tcpip_priv.h>
@@ -12,7 +13,6 @@
 #include <esp_log.h>
 
 // 3rdparty lib includes
-#include <tl/expected.hpp>
 #include <fmt/core.h>
 
 namespace {
@@ -82,7 +82,7 @@ void _udp_recv(void *arg, udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_
     _this->_udp_task_post(pcb, pb, addr, port, ip_current_input_netif());
 }
 
-tl::expected<UdpPacketWrapper, std::string> makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *raddr, uint16_t rport, struct netif *_ntif)
+std::expected<UdpPacketWrapper, std::string> makeUdpPacketWrapper(pbufUniquePtr &&_pb, const ip_addr_t *raddr, uint16_t rport, struct netif *_ntif)
 {
     assert(_pb);
 
@@ -127,10 +127,10 @@ tl::expected<UdpPacketWrapper, std::string> makeUdpPacketWrapper(pbufUniquePtr &
 
 //        break;
 
-        return tl::make_unexpected("udp response on ipv6 not supported");
+        return std::unexpected("udp response on ipv6 not supported");
     }
     default:
-        return tl::make_unexpected(fmt::format("unknown ip type {}", _remoteAddr.type));
+        return std::unexpected(fmt::format("unknown ip type {}", _remoteAddr.type));
     }
 
     std::string_view _data{payload, _pb->len};
