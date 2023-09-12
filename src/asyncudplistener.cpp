@@ -172,7 +172,7 @@ bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
         IP_SET_TYPE_VAL(_pcb->remote_ip, addr->type);
     }
 
-    ESP_LOGI(TAG, "calling udp_bind()...");
+//    ESP_LOGI(TAG, "calling udp_bind()...");
     if (_udp_bind(_pcb, addr, port) != ERR_OK)
     {
         ESP_LOGE(TAG, "failed to bind");
@@ -267,14 +267,14 @@ void AsyncUdpListener::close()
 {
     if (_connected)
     {
-        ESP_LOGI(TAG, "calling udp_diconnect()...");
+//        ESP_LOGI(TAG, "calling udp_diconnect()...");
         _udp_disconnect(_pcb);
         _connected = false;
     }
 
     if (_pcb)
     {
-        ESP_LOGI(TAG, "calling udp_remove()...");
+//        ESP_LOGI(TAG, "calling udp_remove()...");
         udp_remove(_pcb);
         _pcb = nullptr;
     }
@@ -284,7 +284,7 @@ bool AsyncUdpListener::_init()
 {
     if (!_pcb)
     {
-        ESP_LOGI(TAG, "calling udp_new()...");
+//        ESP_LOGI(TAG, "calling udp_new()...");
         _pcb = udp_new();
         if (!_pcb)
         {
@@ -292,7 +292,7 @@ bool AsyncUdpListener::_init()
             return false;
         }
 
-        ESP_LOGI(TAG, "calling udp_recv()...");
+//        ESP_LOGI(TAG, "calling udp_recv()...");
         udp_recv(_pcb, &_udp_recv, (void *)this);
     }
 
