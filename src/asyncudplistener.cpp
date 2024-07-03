@@ -27,7 +27,7 @@ struct lwip_event_packet_t
     struct netif *netif;
 };
 
-typedef struct
+struct udp_api_call_t
 {
     struct tcpip_api_call_data call;
     udp_pcb * pcb;
@@ -36,7 +36,24 @@ typedef struct
     struct pbuf *pb;
     struct netif *netif;
     err_t err;
-} udp_api_call_t;
+};
+
+err_t _udp_connect_api(struct tcpip_api_call_data *api_call_msg)
+{
+    udp_api_call_t *msg = (udp_api_call_t *)api_call_msg;
+    msg->err = udp_connect(msg->pcb, msg->addr, msg->port);
+    return msg->err;
+}
+
+err_t _udp_connect(struct udp_pcb *pcb, const ip_addr_t *addr, u16_t port)
+{
+    udp_api_call_t msg;
+    msg.pcb = pcb;
+    msg.addr = addr;
+    msg.port = port;
+    tcpip_api_call(_udp_connect_api, (struct tcpip_api_call_data *)&msg);
+    return msg.err;
+}
 
 err_t _udp_bind_api(struct tcpip_api_call_data *api_call_msg)
 {
@@ -52,6 +69,22 @@ err_t _udp_bind(struct udp_pcb *pcb, const ip_addr_t *addr, u16_t port)
     msg.addr = addr;
     msg.port = port;
     tcpip_api_call(_udp_bind_api, (struct tcpip_api_call_data*)&msg);
+    return msg.err;
+}
+
+err_t _udp_send_api(struct tcpip_api_call_data *api_call_msg)
+{
+    udp_api_call_t *msg = (udp_api_call_t *)api_call_msg;
+    msg->err = udp_send(msg->pcb, msg->pb);
+    return msg->err;
+}
+
+err_t _udp_send(struct udp_pcb *pcb, struct pbuf *pb)
+{
+    udp_api_call_t msg;
+    msg.pcb = pcb;
+    msg.pb = pb;
+    tcpip_api_call(_udp_send_api, (struct tcpip_api_call_data *)&msg);
     return msg.err;
 }
 
@@ -147,16 +180,8 @@ std::expected<UdpPacketWrapper, std::string> makeUdpPacketWrapper(pbufUniquePtr 
 
 bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
 {
-    if (!_udp_queue.constructed())
-    {
-        _udp_queue.construct(UBaseType_t{32}, sizeof(lwip_event_packet_t *));
-        if (!_udp_queue->handle)
-        {
-            _udp_queue.destruct();
-            ESP_LOGE(TAG, "xQueueCreate failed");
-            return false;
-        }
-    }
+    if (!ensureQueue())
+        return false;
 
     close();
 
@@ -173,13 +198,63 @@ bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
     }
 
 //    ESP_LOGI(TAG, "calling udp_bind()...");
-    if (_udp_bind(_pcb, addr, port) != ERR_OK)
+    if (const auto err = _udp_bind(_pcb, addr, port); err != ERR_OK)
     {
-        ESP_LOGE(TAG, "failed to bind");
+        ESP_LOGE(TAG, "bind() failed with %i", err);
         return false;
     }
 
     _connected = true;
+
+    return true;
+}
+
+bool AsyncUdpListener::connect(ip_addr_t ip, uint16_t port)
+{
+    if (!ensureQueue())
+        return false;
+
+    close();
+
+    if (!_init())
+    {
+        ESP_LOGE(TAG, "failed to init");
+        return false;
+    }
+
+//    ESP_LOGI(TAG, "calling udp_connect()...");
+    if (const auto err = _udp_connect(_pcb, &ip, port); err != ERR_OK)
+    {
+        ESP_LOGE(TAG, "connect() failed with %i", err);
+        return false;
+    }
+
+    _connected = true;
+
+    return true;
+}
+
+bool AsyncUdpListener::connect(esp_ip_addr_t ip, uint16_t port)
+{
+    return connect(wifi_stack::convertIp(ip), port);
+}
+
+bool AsyncUdpListener::send(std::string_view buffer)
+{
+    auto pbt = pbufUniquePtr{pbuf_alloc(PBUF_TRANSPORT, buffer.size(), PBUF_RAM), pbuf_free};
+    if (!pbt)
+    {
+        ESP_LOGE(TAG, "could not allocate pbf");
+        return false;
+    }
+
+    std::memcpy(pbt->payload, buffer.data(), buffer.size());
+
+    if (const auto err = _udp_send(_pcb, pbt.get()); err != ERR_OK)
+    {
+        ESP_LOGE(TAG, "send() failed with %i", err);
+        return false;
+    }
 
     return true;
 }
@@ -278,6 +353,22 @@ void AsyncUdpListener::close()
         udp_remove(_pcb);
         _pcb = nullptr;
     }
+}
+
+bool AsyncUdpListener::ensureQueue()
+{
+    if (!_udp_queue.constructed())
+    {
+        _udp_queue.construct(UBaseType_t{32}, sizeof(lwip_event_packet_t *));
+        if (!_udp_queue->handle)
+        {
+            _udp_queue.destruct();
+            ESP_LOGE(TAG, "xQueueCreate failed");
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool AsyncUdpListener::_init()

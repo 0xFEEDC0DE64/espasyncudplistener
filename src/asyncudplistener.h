@@ -90,6 +90,11 @@ public:
         return listen(IP_ANY_TYPE, port);
     }
 
+    bool connect(ip_addr_t ip, uint16_t port);
+    bool connect(esp_ip_addr_t ip, uint16_t port);
+
+    bool send(std::string_view buffer);
+
     std::optional<UdpPacketWrapper> poll(TickType_t xTicksToWait = 0);
 
     void _udp_task_post(udp_pcb *pcb, pbuf *pb, const ip_addr_t *addr, uint16_t port, struct netif *netif);
@@ -97,6 +102,7 @@ public:
     void close();
 
 private:
+    bool ensureQueue();
     bool _init();
 
 private:
