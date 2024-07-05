@@ -183,7 +183,7 @@ bool AsyncUdpListener::listen(const ip_addr_t *addr, uint16_t port)
     if (!ensureQueue())
         return false;
 
-    close();
+    _close();
 
     if (!_init())
     {
@@ -214,7 +214,7 @@ bool AsyncUdpListener::connect(ip_addr_t ip, uint16_t port)
     if (!ensureQueue())
         return false;
 
-    close();
+    _close();
 
     if (!_init())
     {
@@ -306,17 +306,17 @@ std::optional<UdpPacketWrapper> AsyncUdpListener::poll(TickType_t xTicksToWait)
 
 void AsyncUdpListener::_udp_task_post(udp_pcb *_pcb, pbuf *pb, const ip_addr_t *_addr, uint16_t _port, struct netif *_netif)
 {
-    if (!_udp_queue.constructed())
-    {
-        ESP_LOGW(TAG, "queue not constructed");
-        return;
-    }
-
     while (pb)
     {
         pbufUniquePtr this_pb{pb, pbuf_free};
         pb = pb->next;
         this_pb->next = nullptr;
+
+        if (!_udp_queue.constructed())
+        {
+            ESP_LOGW(TAG, "queue not constructed");
+            continue;
+        }
 
         auto e = std::unique_ptr<lwip_event_packet_t>{new lwip_event_packet_t{
             .pcb = _pcb,
@@ -340,18 +340,14 @@ void AsyncUdpListener::_udp_task_post(udp_pcb *_pcb, pbuf *pb, const ip_addr_t *
 
 void AsyncUdpListener::close()
 {
-    if (_connected)
-    {
-//        ESP_LOGI(TAG, "calling udp_diconnect()...");
-        _udp_disconnect(_pcb);
-        _connected = false;
-    }
+    _close();
 
-    if (_pcb)
+    if (_udp_queue.constructed())
     {
-//        ESP_LOGI(TAG, "calling udp_remove()...");
-        udp_remove(_pcb);
-        _pcb = nullptr;
+        while (const auto &packet = poll())
+            ESP_LOGI(TAG, "discarding received UDP packet");
+
+        _udp_queue.destruct();
     }
 }
 
@@ -388,4 +384,21 @@ bool AsyncUdpListener::_init()
     }
 
     return true;
+}
+
+void AsyncUdpListener::_close()
+{
+    if (_connected)
+    {
+        //        ESP_LOGI(TAG, "calling udp_diconnect()...");
+        _udp_disconnect(_pcb);
+        _connected = false;
+    }
+
+    if (_pcb)
+    {
+        //        ESP_LOGI(TAG, "calling udp_remove()...");
+        udp_remove(_pcb);
+        _pcb = nullptr;
+    }
 }

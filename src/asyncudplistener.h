@@ -104,6 +104,7 @@ public:
 private:
     bool ensureQueue();
     bool _init();
+    void _close();
 
 private:
     cpputils::DelayedConstruction<espcpputils::queue> _udp_queue;
