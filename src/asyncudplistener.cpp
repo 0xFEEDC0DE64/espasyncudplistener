@@ -6,14 +6,12 @@
 // system includes
 #include <cassert>
 #include <expected>
+#include <format>
 
 // esp-idf includes
 #include <lwip/priv/tcpip_priv.h>
 #include <lwip/prot/ethernet.h>
 #include <esp_log.h>
-
-// 3rdparty lib includes
-#include <fmt/core.h>
 
 namespace {
 constexpr const char * const TAG = "ASYNC_UDP_LISTENER";
@@ -163,7 +161,7 @@ std::expected<UdpPacketWrapper, std::string> makeUdpPacketWrapper(pbufUniquePtr 
         return std::unexpected("udp response on ipv6 not supported");
     }
     default:
-        return std::unexpected(fmt::format("unknown ip type {}", _remoteAddr.type));
+        return std::unexpected(std::format("unknown ip type {}", _remoteAddr.type));
     }
 
     std::string_view _data{payload, _pb->len};
