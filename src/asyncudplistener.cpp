@@ -325,7 +325,7 @@ void AsyncUdpListener::_udp_task_post(udp_pcb *_pcb, pbuf *pb, const ip_addr_t *
         }};
 
         auto ptr = e.get();
-        if (const auto result = _udp_queue->send(&ptr, portMAX_DELAY); result != pdPASS)
+        if (const auto result = _udp_queue->send(&ptr, 0); result != pdPASS)
         {
             ESP_LOGE(TAG, "_udp_queue->send failed with %i", result);
             continue;
